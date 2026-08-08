@@ -215,12 +215,12 @@ if __name__ == "__main__":
 
     # 导出序列化 JSON
     vocab_serialized = {
-        k: v.decode("utf-8", errors="replace") for k, v in vocab.items()
+        k: v.decode("latin-1", errors="replace") for k, v in vocab.items()
     }
     merges_serialized = [
         [
-            m[0].decode("utf-8", errors="replace"),
-            m[1].decode("utf-8", errors="replace"),
+            m[0].decode("latin-1", errors="replace"),
+            m[1].decode("latin-1", errors="replace"),
         ]
         for m in merges
     ]
