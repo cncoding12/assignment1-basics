@@ -8,16 +8,7 @@ def train_bpe(
     special_tokens: list[str],
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """
-    高效、低内存占用的 Byte-Level BPE 分词器训练函数。
-
-    Args:
-        input_path: 训练文本文件路径
-        vocab_size: 目标词表大小
-        special_tokens: 特殊 token 列表
-
-    Returns:
-        vocab: dict[int, bytes] (ID 到字节串的映射)
-        merges: list[tuple[bytes, bytes]] (按顺序排列的合并操作列表)
+    100% 准确匹配官方 Snapshot 且高性能的 Byte-Level BPE 训练实现。
     """
     # 1. 初始化基础词表 (0-255 基础字节)
     vocab: dict[int, bytes] = {i: bytes([i]) for i in range(256)}
@@ -28,47 +19,38 @@ def train_bpe(
 
     merges: list[tuple[bytes, bytes]] = []
 
-    # 计算目标合并次数
     num_merges = vocab_size - len(vocab)
     if num_merges <= 0:
         return vocab, merges
 
-    # 3. 编译正则表达式
-    gpt2_pat = re.compile(
-        r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    )
+    # 3. 读取完整文件（不能按 \n 逐行读取，必须保持 \n\n 等连续空白字符完整）
+    with open(input_path, "r", encoding="utf-8") as f:
+        text = f.read()
 
+    # 4. 根据 special_tokens 进行文档级切分
     if special_tokens:
         special_regex = re.compile(
             "|".join(
                 re.escape(tok) for tok in sorted(special_tokens, key=len, reverse=True)
             )
         )
+        chunks = [c for c in special_regex.split(text) if c]
     else:
-        special_regex = None
+        chunks = [text]
 
-    # 4. 逐行读取与预分词（兼顾速度与内存，防止超大文件 OOM）
+    # 5. GPT-2 正则表达式预分词
+    gpt2_pat = re.compile(
+        r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    )
+
     word_counts: dict[tuple[bytes, ...], int] = Counter()
+    for chunk in chunks:
+        for word_str in gpt2_pat.findall(chunk):
+            word_bytes = word_str.encode("utf-8")
+            word_tuple = tuple(bytes([b]) for b in word_bytes)
+            word_counts[word_tuple] += 1
 
-    with open(input_path, "r", encoding="utf-8") as f:
-        for line in f:
-            if not line:
-                continue
-
-            # 按 special_tokens 硬边界切分文本
-            if special_regex:
-                chunks = [c for c in special_regex.split(line) if c]
-            else:
-                chunks = [line]
-
-            # 利用 findall 在 C 语言层面快速抽取词汇并累加到词频字典
-            for chunk in chunks:
-                for word_str in gpt2_pat.findall(chunk):
-                    word_bytes = word_str.encode("utf-8")
-                    word_tuple = tuple(bytes([b]) for b in word_bytes)
-                    word_counts[word_tuple] += 1
-
-    # 5. 构建初始 pair 频次表 (pair_counts) 及 倒排索引 (pair_to_words)
+    # 6. 构建初始 pair 频次表 (pair_counts) 及 倒排索引 (pair_to_words)
     pair_counts: Counter[tuple[bytes, bytes]] = Counter()
     pair_to_words: defaultdict[tuple[bytes, bytes], set] = defaultdict(set)
 
@@ -78,12 +60,12 @@ def train_bpe(
             pair_counts[pair] += count
             pair_to_words[pair].add(word)
 
-    # 6. 增量 BPE 迭代合并（仅更新受影响的词，大幅提升速度）
+    # 7. 增量 BPE 迭代合并
     for _ in range(num_merges):
         if not pair_counts:
             break
 
-        # 选取频次最高的 pair；若频次相同，字典序大的优先 (Tie-breaking)
+        # 选取最高频 pair；频次相同时按字典序大的优先 (Tie-breaking)
         best_pair = max(pair_counts.items(), key=lambda x: (x[1], x[0]))[0]
 
         merges.append(best_pair)
