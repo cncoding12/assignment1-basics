@@ -49,12 +49,12 @@ class Tokenizer:
         special_tokens: list[str] | None = None,
     ) -> "Tokenizer":
         """
-        从序列化的词表和 merges JSON 文件反序列化加载构造 Tokenizer
+        使用 latin-1 1:1 无损反序列化 JSON 词表和 merges
         """
         with open(vocab_filepath, "r", encoding="utf-8") as f:
             vocab_raw = json.load(f)
         vocab = {
-            int(k): v.encode("utf-8") if isinstance(v, str) else bytes(v)
+            int(k): v.encode("latin-1") if isinstance(v, str) else bytes(v)
             for k, v in vocab_raw.items()
         }
 
@@ -62,8 +62,8 @@ class Tokenizer:
             merges_raw = json.load(f)
         merges = [
             (
-                m[0].encode("utf-8") if isinstance(m[0], str) else bytes(m[0]),
-                m[1].encode("utf-8") if isinstance(m[1], str) else bytes(m[1]),
+                m[0].encode("latin-1") if isinstance(m[0], str) else bytes(m[0]),
+                m[1].encode("latin-1") if isinstance(m[1], str) else bytes(m[1]),
             )
             for m in merges_raw
         ]
