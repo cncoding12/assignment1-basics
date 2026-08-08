@@ -60,7 +60,21 @@ def run_embedding(
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
 
-    raise NotImplementedError
+    device, dtype = token_ids.device, weights.dtype
+    
+    # 实例化 Embedding 模块
+    embedding_layer = Embedding(
+        num_embeddings=vocab_size,
+        embedding_dim=d_model,
+        device=device,
+        dtype=dtype,
+    )
+    
+    # 将外部给定的测试权重加载到模块中
+    embedding_layer.weight = torch.nn.Parameter(weights)
+    
+    # 前向传播并返回结果
+    return embedding_layer(token_ids)
 
 
 def run_swiglu(
