@@ -59,7 +59,8 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-
+    from cs336_basics.model import Embedding
+    
     device, dtype = token_ids.device, weights.dtype
     
     # 实例化 Embedding 模块
