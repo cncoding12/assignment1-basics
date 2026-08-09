@@ -60,7 +60,7 @@ def run_embedding(
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
     from cs336_basics.model import Embedding
-    
+
     device, dtype = token_ids.device, weights.dtype
     
     # 实例化 Embedding 模块
@@ -402,8 +402,20 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    # 确保导入了刚才写的 RMSNorm
+    from cs336_basics.model import RMSNorm
 
+    device, dtype = x.device, weights.dtype
+
+    rmsnorm_layer = RMSNorm(
+        d_model=d_model,
+        eps=eps,
+        device=device,
+        dtype=dtype,
+    )
+    rmsnorm_layer.weight = torch.nn.Parameter(weights)
+
+    return rmsnorm_layer(x)
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
     """Given a tensor of inputs, return the output of applying SiLU

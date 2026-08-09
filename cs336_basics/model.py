@@ -83,3 +83,44 @@ class Embedding(nn.Module):
         """
         # 直接通过张量索引（Tensor Indexing）实现 lookup 功能
         return self.weight[token_ids]
+    
+class RMSNorm(nn.Module):
+    """
+    Root Mean Square Layer Normalization (RMSNorm)
+    """
+    def __init__(
+        self,
+        d_model: int,
+        eps: float = 1e-5,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.eps = eps
+
+        factory_kwargs = {"device": device, "dtype": dtype}
+        # 可学习参数 g_i (gain)，形状为 (d_model,)，初始化为全 1
+        self.weight = nn.Parameter(torch.ones(d_model, **factory_kwargs))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x 形状: (batch_size, sequence_length, d_model) 或 (..., d_model)
+        """
+        in_dtype = x.dtype
+        # 1. 向上转型为 float32，防止 x^2 溢出
+        x_fp32 = x.to(torch.float32)
+
+        # 2. 计算最后一个维度的均方值 (Mean Square): (1/d) * sum(a_i^2)
+        variance = x_fp32.pow(2).mean(dim=-1, keepdim=True)
+
+        # 3. 计算 1 / RMS(a) = 1 / sqrt(variance + eps)
+        # 使用 torch.rsqrt 性能更好
+        rms_inv = torch.rsqrt(variance + self.eps)
+
+        # 4. 归一化并乘以 gain 参数 self.weight
+        normed_x = x_fp32 * rms_inv
+        result = normed_x * self.weight
+
+        # 5. 转回输入张量原始的 dtype 并返回
+        return result.to(in_dtype)
