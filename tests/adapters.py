@@ -405,7 +405,8 @@ def run_rmsnorm(
     # 确保导入了刚才写的 RMSNorm
     from cs336_basics.model import RMSNorm
 
-    device, dtype = x.device, weights.dtype
+    # 把 x 修改为 in_features
+    device, dtype = in_features.device, weights.dtype
 
     rmsnorm_layer = RMSNorm(
         d_model=d_model,
@@ -415,7 +416,8 @@ def run_rmsnorm(
     )
     rmsnorm_layer.weight = torch.nn.Parameter(weights)
 
-    return rmsnorm_layer(x)
+    # 传入 in_features
+    return rmsnorm_layer(in_features)
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
     """Given a tensor of inputs, return the output of applying SiLU
