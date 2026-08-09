@@ -107,7 +107,24 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    from cs336_basics.model import SwiGLU
+
+    device, dtype = in_features.device, in_features.dtype
+
+    # 实例化 SwiGLU 模块
+    swiglu = SwiGLU(
+        d_model=d_model,
+        d_ff=d_ff,
+        device=device,
+        dtype=dtype,
+    )
+
+    # 注意：在前期实现的 Linear 中，权重存在 self.W 里
+    swiglu.w1.W = torch.nn.Parameter(w1_weight)
+    swiglu.w2.W = torch.nn.Parameter(w2_weight)
+    swiglu.w3.W = torch.nn.Parameter(w3_weight)
+
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(

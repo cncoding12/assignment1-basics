@@ -124,3 +124,45 @@ class RMSNorm(nn.Module):
 
         # 5. 转回输入张量原始的 dtype 并返回
         return result.to(in_dtype)
+
+class SwiGLU(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.d_model = d_model
+
+        # 1. 计算 d_ff：若未显式传入，取 8/3 * d_model 并向上对齐到 64 的倍数 (LLaMA 官方对齐逻辑)
+        if d_ff is None:
+            raw_d_ff = int(2 * 4 * d_model / 3)
+            self.d_ff = int((raw_d_ff + 63) // 64 * 64)
+        else:
+            self.d_ff = d_ff
+
+        factory_kwargs = {"device": device, "dtype": dtype}
+
+        # 2. 声明 3 个线性层（必须透传 device 和 dtype！）
+        self.w1 = Linear(in_features=self.d_model, out_features=self.d_ff, **factory_kwargs)  # Gate
+        self.w3 = Linear(in_features=self.d_model, out_features=self.d_ff, **factory_kwargs)  # Up
+        self.w2 = Linear(in_features=self.d_ff, out_features=self.d_model, **factory_kwargs)  # Down
+
+    def silu(self, x: torch.Tensor) -> torch.Tensor:
+        # 讲义要求：使用 torch.sigmoid 以保证数值稳定性
+        return x * torch.sigmoid(x)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # 1. Gate 分支: SiLU(W1 * x)
+        gate = self.silu(self.w1(x))
+
+        # 2. Up 分支: W3 * x
+        up = self.w3(x)
+
+        # 3. 门控点乘: gate ⊙ up
+        hidden = gate * up
+
+        # 4. Down 降维输出: W2 * hidden
+        return self.w2(hidden)
