@@ -255,7 +255,7 @@ def run_multihead_self_attention_with_rope(
     attn.q_proj.W = torch.nn.Parameter(q_proj_weight)
     attn.k_proj.W = torch.nn.Parameter(k_proj_weight)
     attn.v_proj.W = torch.nn.Parameter(v_proj_weight)
-    attn.o_proj.W = torch.nn.Parameter(o_proj_weight)
+    attn.output_proj.W = torch.nn.Parameter(o_proj_weight)
 
     return attn(in_features, token_positions=token_positions)
 
@@ -483,7 +483,7 @@ def run_transformer_lm(
         num_layers=num_layers,
         num_heads=num_heads,
         d_ff=d_ff,
-        theta=theta,
+        theta=rope_theta,
         device=device,
         dtype=dtype,
     )
