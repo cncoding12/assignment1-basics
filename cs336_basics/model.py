@@ -312,7 +312,7 @@ class CausalSelfAttention(nn.Module):
         self.q_proj = Linear(d_model, d_model, **factory_kwargs)
         self.k_proj = Linear(d_model, d_model, **factory_kwargs)
         self.v_proj = Linear(d_model, d_model, **factory_kwargs)
-        self.o_proj = Linear(d_model, d_model, **factory_kwargs)
+        self.output_proj  = Linear(d_model, d_model, **factory_kwargs)
 
         if self.use_rope:
             self.rope = RotaryPositionalEmbedding(
@@ -360,7 +360,7 @@ class CausalSelfAttention(nn.Module):
         attn_out = rearrange(attn_out, "b h s d -> b s (h d)")
 
         # 7. 输出 Projection
-        return self.o_proj(attn_out)
+        return self.output_proj(attn_out)
 
 class TransformerBlock(nn.Module):
     """

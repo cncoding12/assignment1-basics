@@ -196,7 +196,7 @@ def run_multihead_self_attention(
     attn.q_proj.W = torch.nn.Parameter(q_proj_weight)
     attn.k_proj.W = torch.nn.Parameter(k_proj_weight)
     attn.v_proj.W = torch.nn.Parameter(v_proj_weight)
-    attn.o_proj.W = torch.nn.Parameter(o_proj_weight)
+    attn.output_proj.W = torch.nn.Parameter(o_proj_weight)
 
     return attn(in_features)
 
