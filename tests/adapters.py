@@ -361,7 +361,35 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    from cs336_basics.model import TransformerBlock
+
+    device, dtype = in_features.device, in_features.dtype
+
+    block = TransformerBlock(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        max_seq_len=max_seq_len,
+        theta=theta,
+        device=device,
+        dtype=dtype,
+    )
+
+    # 递归/手动加载字典里的权重
+    for key, val in weights.items():
+        submodule = block
+        parts = key.split(".")
+        for part in parts[:-1]:
+            submodule = getattr(submodule, part)
+        
+        # 兼容我们的 Linear 类 (存储在 .W 中) 以及 Parameter/weight
+        attr_name = parts[-1]
+        if attr_name == "weight" and hasattr(submodule, "W"):
+            submodule.W = torch.nn.Parameter(val)
+        else:
+            setattr(submodule, attr_name, torch.nn.Parameter(val))
+
+    return block(in_features)
 
 
 def run_transformer_lm(
@@ -443,7 +471,41 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    from cs336_basics.model import TransformerLM
+
+    device = in_indices.device
+    dtype = list(weights.values())[0].dtype
+
+    model = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        theta=theta,
+        device=device,
+        dtype=dtype,
+    )
+
+    # 加载状态字典里的所有层权重
+    for key, val in weights.items():
+        submodule = model
+        parts = key.split(".")
+        for part in parts[:-1]:
+            # 支持 ModuleList 索引如 layers.0
+            if part.isdigit():
+                submodule = submodule[int(part)]
+            else:
+                submodule = getattr(submodule, part)
+
+        attr_name = parts[-1]
+        if attr_name == "weight" and hasattr(submodule, "W"):
+            submodule.W = torch.nn.Parameter(val)
+        else:
+            setattr(submodule, attr_name, torch.nn.Parameter(val))
+
+    return model(in_indices)
 
 
 def run_rmsnorm(

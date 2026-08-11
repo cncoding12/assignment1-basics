@@ -361,3 +361,136 @@ class CausalSelfAttention(nn.Module):
 
         # 7. 输出 Projection
         return self.o_proj(attn_out)
+
+class TransformerBlock(nn.Module):
+    """
+    Pre-Norm 结构的 Transformer Decoder Block
+    """
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        max_seq_len: int = 2048,
+        theta: float = 10000.0,
+        use_rope: bool = True,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        factory_kwargs = {"device": device, "dtype": dtype}
+
+        # 1. 第一子层: Pre-Norm + Multi-Head Self-Attention
+        self.ln1 = RMSNorm(d_model=d_model, **factory_kwargs)
+        self.attn = CausalSelfAttention(
+            d_model=d_model,
+            num_heads=num_heads,
+            max_seq_len=max_seq_len,
+            theta=theta,
+            use_rope=use_rope,
+            **factory_kwargs,
+        )
+
+        # 2. 第二子层: Pre-Norm + SwiGLU FFN
+        self.ln2 = RMSNorm(d_model=d_model, **factory_kwargs)
+        self.ffn = SwiGLU(
+            d_model=d_model,
+            d_ff=d_ff,
+            **factory_kwargs,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        x: (batch_size, sequence_length, d_model)
+        """
+        # 第一子层残差连接: x + MHA(RMSNorm(x))
+        x = x + self.attn(self.ln1(x), token_positions=token_positions)
+
+        # 第二子层残差连接: x + FFN(RMSNorm(x))
+        x = x + self.ffn(self.ln2(x))
+
+        return x
+
+class TransformerLM(nn.Module):
+    """
+    完整的 Decoder-only Transformer 语言模型
+    """
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        d_model: int,
+        num_layers: int,
+        num_heads: int,
+        d_ff: int,
+        theta: float = 10000.0,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.d_model = d_model
+        self.num_layers = num_layers
+
+        factory_kwargs = {"device": device, "dtype": dtype}
+
+        # 1. 词嵌入层
+        self.token_embeddings = Embedding(
+            num_embeddings=vocab_size,
+            embedding_dim=d_model,
+            **factory_kwargs,
+        )
+
+        # 2. N 层 Transformer Blocks
+        self.layers = nn.ModuleList([
+            TransformerBlock(
+                d_model=d_model,
+                num_heads=num_heads,
+                d_ff=d_ff,
+                max_seq_len=context_length,
+                theta=theta,
+                use_rope=True,
+                **factory_kwargs,
+            )
+            for _ in range(num_layers)
+        ])
+
+        # 3. 最终的 RMSNorm
+        self.ln_final = RMSNorm(d_model=d_model, **factory_kwargs)
+
+        # 4. LM Head (未归一化的词表分布概率/Logits)
+        self.lm_head = Linear(
+            in_features=d_model,
+            out_features=vocab_size,
+            **factory_kwargs,
+        )
+
+    def forward(
+        self,
+        token_ids: torch.Tensor,
+        token_positions: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        token_ids: (batch_size, sequence_length) LongTensor
+        返回: (batch_size, sequence_length, vocab_size) Logits
+        """
+        # 1. Embedding lookup
+        x = self.token_embeddings(token_ids)  # (B, S, d_model)
+
+        # 2. 依次通过每一个 Transformer Block
+        for layer in self.layers:
+            x = layer(x, token_positions=token_positions)
+
+        # 3. 最终 Layer Normalization
+        x = self.ln_final(x)
+
+        # 4. 映射到词表大小的 Logits
+        logits = self.lm_head(x)  # (B, S, vocab_size)
+
+        return logits
