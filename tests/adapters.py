@@ -180,7 +180,25 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.model import CausalSelfAttention
+
+    device, dtype = in_features.device, in_features.dtype
+
+    attn = CausalSelfAttention(
+        d_model=d_model,
+        num_heads=num_heads,
+        use_rope=False,
+        device=device,
+        dtype=dtype,
+    )
+
+    # 载入测试权重 (注意：我们的 Linear 类权重存放在 self.W 中)
+    attn.q_proj.W = torch.nn.Parameter(q_proj_weight)
+    attn.k_proj.W = torch.nn.Parameter(k_proj_weight)
+    attn.v_proj.W = torch.nn.Parameter(v_proj_weight)
+    attn.o_proj.W = torch.nn.Parameter(o_proj_weight)
+
+    return attn(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -220,7 +238,26 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.model import CausalSelfAttention
+
+    device, dtype = in_features.device, in_features.dtype
+
+    attn = CausalSelfAttention(
+        d_model=d_model,
+        num_heads=num_heads,
+        max_seq_len=max_seq_len,
+        theta=theta,
+        use_rope=True,
+        device=device,
+        dtype=dtype,
+    )
+
+    attn.q_proj.W = torch.nn.Parameter(q_proj_weight)
+    attn.k_proj.W = torch.nn.Parameter(k_proj_weight)
+    attn.v_proj.W = torch.nn.Parameter(v_proj_weight)
+    attn.o_proj.W = torch.nn.Parameter(o_proj_weight)
+
+    return attn(in_features, token_positions=token_positions)
 
 
 def run_rope(

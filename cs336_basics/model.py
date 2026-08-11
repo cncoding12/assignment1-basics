@@ -262,27 +262,103 @@ def scaled_dot_product_attention(
     mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
-    缩放点积注意力
-    Q: (batch_size, ..., seq_len_q, d_k)
-    K: (batch_size, ..., seq_len_k, d_k)
-    V: (batch_size, ..., seq_len_k, d_v)
-    mask: 可选的布尔掩码 (seq_len_q, seq_len_k) 或与注意力权重可广播的形状
+    使用 einops.einsum 的缩放点积注意力
+    Q: (..., seq_len_q, d_k)
+    K: (..., seq_len_k, d_k)
+    V: (..., seq_len_k, d_v)
     """
     d_k = Q.size(-1)
 
     # 1. 计算 Q K^T / sqrt(d_k)
-    # torch.matmul 自动处理前导 batch 维度，K 在最后两个维度转置 (-2, -1)
-    scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(d_k)  # (batch_size, ..., seq_len_q, seq_len_k)
+    # 用 einsum 替代 torch.matmul(Q, K.transpose(-2, -1))，维度关系一目了然
+    scores = einsum(Q, K, "... s_q d_k, ... s_k d_k -> ... s_q s_k") / math.sqrt(d_k)
 
     # 2. 施加 Mask: 将 False 位置填为 -inf
     if mask is not None:
-        # ~mask 将 True 变成 False，False 变成 True，对需要掩盖的位置填入 -inf
         scores = scores.masked_fill(~mask, float("-inf"))
 
-    # 3. 在最后一个维度 (seq_len_k) 应用自定义的 softmax
-    attn_weights = softmax(scores, dim=-1)  # (batch_size, ..., seq_len_q, seq_len_k)
+    # 3. Softmax 归一化
+    attn_weights = softmax(scores, dim=-1)
 
-    # 4. 加权求和得到输出: attn_weights @ V
-    output = torch.matmul(attn_weights, V)  # (batch_size, ..., seq_len_q, d_v)
+    # 4. 加权求和: attn_weights @ V
+    # 用 einsum 替代加权相乘
+    output = einsum(attn_weights, V, "... s_q s_k, ... s_k d_v -> ... s_q d_v")
 
     return output
+
+class CausalSelfAttention(nn.Module):
+    """
+    使用 einops.rearrange 重构的因果多头自注意力层
+    """
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        max_seq_len: int = 2048,
+        theta: float = 10000.0,
+        use_rope: bool = True,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        assert d_model % num_heads == 0, f"d_model ({d_model}) 必须能被 num_heads ({num_heads}) 整除"
+        
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_k = d_model // num_heads
+        self.use_rope = use_rope
+
+        factory_kwargs = {"device": device, "dtype": dtype}
+
+        self.q_proj = Linear(d_model, d_model, **factory_kwargs)
+        self.k_proj = Linear(d_model, d_model, **factory_kwargs)
+        self.v_proj = Linear(d_model, d_model, **factory_kwargs)
+        self.o_proj = Linear(d_model, d_model, **factory_kwargs)
+
+        if self.use_rope:
+            self.rope = RotaryPositionalEmbedding(
+                theta=theta,
+                d_k=self.d_k,
+                max_seq_len=max_seq_len,
+                device=device,
+            )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, S, _ = x.shape
+
+        # 1. 投影得到 Q, K, V
+        q = self.q_proj(x)
+        k = self.k_proj(x)
+        v = self.v_proj(x)
+
+        # 2. 用 rearrange 拆分多头: (b, s, h*d) -> (b, h, s, d)
+        # 完全替代了 .view(B, S, h, d).transpose(1, 2)
+        q = rearrange(q, "b s (h d) -> b h s d", h=self.num_heads, d=self.d_k)
+        k = rearrange(k, "b s (h d) -> b h s d", h=self.num_heads, d=self.d_k)
+        v = rearrange(v, "b s (h d) -> b h s d", h=self.num_heads, d=self.d_k)
+
+        # 3. 施加 RoPE 位置编码
+        if self.use_rope:
+            if token_positions is None:
+                token_positions = torch.arange(S, device=x.device)
+            
+            rope_pos = token_positions.unsqueeze(1) if token_positions.ndim == 2 else token_positions
+            q = self.rope(q, rope_pos)
+            k = self.rope(k, rope_pos)
+
+        # 4. 因果掩码
+        causal_mask = torch.tril(torch.ones((S, S), device=x.device, dtype=torch.bool))
+
+        # 5. 计算 Attention
+        attn_out = scaled_dot_product_attention(q, k, v, mask=causal_mask)
+
+        # 6. 用 rearrange 恢复并拼接多头: (b, h, s, d) -> (b, s, h*d)
+        # 完全替代了 .transpose(1, 2).contiguous().view(B, S, d_model)
+        attn_out = rearrange(attn_out, "b h s d -> b s (h d)")
+
+        # 7. 输出 Projection
+        return self.o_proj(attn_out)
