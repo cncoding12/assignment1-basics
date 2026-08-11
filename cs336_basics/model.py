@@ -166,3 +166,73 @@ class SwiGLU(nn.Module):
 
         # 4. Down 降维输出: W2 * hidden
         return self.w2(hidden)
+
+def _rotate_half(x: torch.Tensor) -> torch.Tensor:
+    """
+    将相邻的两两维度 (x0, x1, x2, x3, ...) 变换为 (-x1, x0, -x3, x2, ...)
+    支持任意 Batch 维度 (..., seq_len, d_k)
+    """
+    x_even = x[..., 0::2]  # x0, x2, ...
+    x_odd  = x[..., 1::2]  # x1, x3, ...
+    
+    # 组合为 [-x1, x0], [-x3, x2], ...
+    stacked = torch.stack((-x_odd, x_even), dim=-1)
+    
+    # 展开最后两个维度 (d_k // 2, 2) -> d_k
+    return stacked.flatten(-2)
+
+
+class RotaryPositionalEmbedding(nn.Module):
+    """
+    Rotary Position Embedding (RoPE)
+    """
+    def __init__(
+        self,
+        theta: float,
+        d_k: int,
+        max_seq_len: int,
+        device: torch.device | None = None,
+    ):
+        super().__init__()
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+
+        # 1. 计算频率 freqs: theta ** (-2 * (k-1) / d_k) for k in 1..d_k/2
+        # arange(0, d_k, 2) -> 0, 2, 4, ..., d_k-2
+        freqs = 1.0 / (
+            theta ** (torch.arange(0, d_k, 2, device=device, dtype=torch.float32) / d_k)
+        )  # 形状: (d_k // 2,)
+
+        # 2. 生成所有位置 pos: 0, 1, ..., max_seq_len - 1
+        positions = torch.arange(max_seq_len, device=device, dtype=torch.float32)  # (max_seq_len,)
+
+        # 3. 外积得到每个位置每个通道的角度 theta_{i, k}
+        # angles 形状: (max_seq_len, d_k // 2)
+        angles = torch.outer(positions, freqs)
+
+        # 4. 计算 cos 和 sin，并交错复制扩展到 d_k 维
+        # cos_cached / sin_cached 形状: (max_seq_len, d_k)
+        cos = torch.cos(angles)
+        sin = torch.sin(angles)
+        
+        # 将每个角度重复两次，对应 (x0, x1) 使用同一个角度 theta_{i, k}
+        cos = torch.repeat_interleave(cos, repeats=2, dim=-1)
+        sin = torch.repeat_interleave(sin, repeats=2, dim=-1)
+
+        # 5. 注册为不需要梯度且非持久化 (persistent=False) 的 Buffer
+        self.register_buffer("cos", cos, persistent=False)
+        self.register_buffer("sin", sin, persistent=False)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        """
+        x: (..., seq_len, d_k)
+        token_positions: (..., seq_len) - 每个 token 的绝对位置编号
+        """
+        # 利用 PyTorch 高级索引直接切片: self.cos[token_positions]
+        # 如果 token_positions 形状为 (..., seq_len)，切片后形状自动变为 (..., seq_len, d_k)
+        cos = self.cos[token_positions].to(dtype=x.dtype)
+        sin = self.sin[token_positions].to(dtype=x.dtype)
+
+        # RoPE 旋转计算公式: x * cos + rotate_half(x) * sin
+        return (x * cos) + (_rotate_half(x) * sin)
