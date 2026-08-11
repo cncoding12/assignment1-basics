@@ -1,8 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-from einops import einsum
-
+from einops import einsum, rearrange
 
 class Linear(nn.Module):
     def __init__(
