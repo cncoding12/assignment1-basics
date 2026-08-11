@@ -236,3 +236,53 @@ class RotaryPositionalEmbedding(nn.Module):
 
         # RoPE 旋转计算公式: x * cos + rotate_half(x) * sin
         return (x * cos) + (_rotate_half(x) * sin)
+
+def softmax(x: torch.Tensor, dim: int) -> torch.Tensor:
+    """
+    数值稳定的 Softmax 实现
+    x: 任意维度的输入张量
+    dim: 需要归一化的维度
+    """
+    # 1. 沿 dim 维度求最大值，keepdim=True 保持形状以便广播
+    max_val = torch.max(x, dim=dim, keepdim=True).values
+
+    # 2. 减去最大值后取指数 (防止 exp 上溢)
+    exp_x = torch.exp(x - max_val)
+
+    # 3. 沿 dim 维度求和并归一化
+    sum_exp_x = torch.sum(exp_x, dim=dim, keepdim=True)
+    
+    return exp_x / sum_exp_x
+
+
+def scaled_dot_product_attention(
+    Q: torch.Tensor,
+    K: torch.Tensor,
+    V: torch.Tensor,
+    mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """
+    缩放点积注意力
+    Q: (batch_size, ..., seq_len_q, d_k)
+    K: (batch_size, ..., seq_len_k, d_k)
+    V: (batch_size, ..., seq_len_k, d_v)
+    mask: 可选的布尔掩码 (seq_len_q, seq_len_k) 或与注意力权重可广播的形状
+    """
+    d_k = Q.size(-1)
+
+    # 1. 计算 Q K^T / sqrt(d_k)
+    # torch.matmul 自动处理前导 batch 维度，K 在最后两个维度转置 (-2, -1)
+    scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(d_k)  # (batch_size, ..., seq_len_q, seq_len_k)
+
+    # 2. 施加 Mask: 将 False 位置填为 -inf
+    if mask is not None:
+        # ~mask 将 True 变成 False，False 变成 True，对需要掩盖的位置填入 -inf
+        scores = scores.masked_fill(~mask, float("-inf"))
+
+    # 3. 在最后一个维度 (seq_len_k) 应用自定义的 softmax
+    attn_weights = softmax(scores, dim=-1)  # (batch_size, ..., seq_len_q, seq_len_k)
+
+    # 4. 加权求和得到输出: attn_weights @ V
+    output = torch.matmul(attn_weights, V)  # (batch_size, ..., seq_len_q, d_v)
+
+    return output
