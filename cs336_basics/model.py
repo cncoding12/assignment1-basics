@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-from einops import einsum, rearrange
+from einops import einsum, rearrange,reduce
 
 class Linear(nn.Module):
     def __init__(
@@ -494,3 +494,25 @@ class TransformerLM(nn.Module):
         logits = self.lm_head(x)  # (B, S, vocab_size)
 
         return logits
+
+def cross_entropy(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    """
+    使用 einops.reduce 实现的交叉熵损失
+    logits: (..., vocab_size)
+    targets: (...)
+    """
+    # 1. 用 reduce 沿 vocab 维度求最大值，保留维度 1 方便广播 ("... vocab -> ... 1")
+    max_logits = reduce(logits, "... vocab -> ... 1", "max")
+    stabilized_logits = logits - max_logits  # (..., vocab_size)
+
+    # 2. 用 reduce 沿 vocab 维度求和并开 log ("... vocab -> ...")
+    sum_exp = reduce(torch.exp(stabilized_logits), "... vocab -> ...", "sum")
+    log_sum_exp = torch.log(sum_exp)  # (...)
+
+    # 3. 提取目标位置的 Logit (o_y - m)
+    target_logits = stabilized_logits.gather(dim=-1, index=targets.unsqueeze(-1)).squeeze(-1)
+
+    # 4. 计算单位置损失并求均值
+    loss = log_sum_exp - target_logits
+    
+    return torch.mean(loss)
