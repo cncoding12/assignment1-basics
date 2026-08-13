@@ -15,19 +15,20 @@ def get_lr_cosine_schedule(
     T_w: Warmup 阶段步数
     T_c: Cosine 衰减结束的总步数
     """
-    # 1. Warm-up 预热阶段
     if t < T_w:
         return (t / T_w) * alpha_max
 
-    # 2. Cosine annealing 余弦衰减阶段
+    # 2. 边界防错：如果预热步数等于或大于总步数，预热结束后直接返回 alpha_min
+    if T_c <= T_w:
+        return alpha_min
+
+    # 3. Cosine annealing 阶段
     if t <= T_c:
-        # progress 范围在 [0, 1]
         progress = (t - T_w) / (T_c - T_w)
         return alpha_min + 0.5 * (1.0 + math.cos(math.pi * progress)) * (alpha_max - alpha_min)
 
-    # 3. Post-annealing 衰减结束阶段，保持最小学习率
+    # 4. Post-annealing 阶段
     return alpha_min
-
 
 from typing import Iterable
 import torch
