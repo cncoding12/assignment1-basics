@@ -13,7 +13,7 @@ tokenizer = Tokenizer.from_files(
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# 2. 实例化模型并加载之前导出的 37MB 权重文件
+# 2. 实例化模型并加载权重
 model = TransformerLM(
     vocab_size=10000,
     context_length=256,
@@ -26,23 +26,26 @@ model = TransformerLM(
 model.load_state_dict(torch.load("results/model_weights.pt", map_location=device))
 model.to(device)
 
-# 3. 输入 Prompt 并进行文本生成
+# 3. 输入 Prompt
 prompt_text = "Once upon a time, there was a little girl named Lily."
 print(f"📝 Prompt: {prompt_text}\n")
 
 prompt_ids = torch.tensor(tokenizer.encode(prompt_text), dtype=torch.long, device=device)
 
-# 自回归采样生成 100 个 Token
+# 获取 <|endoftext|> 的 Token ID (修改了这一行)
+eos_id = tokenizer.encode("<|endoftext|>")[0]
+
+# 4. 自回归生成故事
 output_ids = generate(
     model=model,
     prompt_tokens=prompt_ids,
     max_new_tokens=100,
     temperature=0.8,
     top_p=0.9,
-    eos_token_id=tokenizer.special_tokens.get("<|endoftext|>"),
+    eos_token_id=eos_id,
 )
 
-# 4. Decode 还原为文本并打印
+# 5. 解码打印
 story = tokenizer.decode(output_ids[0].tolist())
 print("📖 Generated Story:\n" + "-"*40)
 print(story)
